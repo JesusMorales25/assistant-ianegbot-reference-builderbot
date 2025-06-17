@@ -85,4 +85,7 @@ const main = async () => {
     httpServer(+PORT);
 };
 
-main();
+main()
+    .then(() => console.log("🤖 Bot iniciado correctamente"))
+    .catch(err => console.error("❌ Error al iniciar el bot:", err));
+process.stdin.resume();
