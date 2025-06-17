@@ -86,6 +86,6 @@ const main = async () => {
 };
 
 main()
-    .then(() => console.log("🤖 Bot iniciado correctamente"))
+    .then(() => console.log("🤖 Bot iniciado correctamente..."))
     .catch(err => console.error("❌ Error al iniciar el bot:", err));
 process.stdin.resume();
