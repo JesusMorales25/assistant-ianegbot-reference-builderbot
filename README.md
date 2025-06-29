@@ -1,75 +1,55 @@
-# WhatsApp AI Assistant Bot (BuilderBot.app)
+WhatsApp AI Assistant Bot
+<p align="center"> <img src="https://raw.githubusercontent.com/your-org/your-repo/main/assets/logo.png" height="80"> </p>
 
-<p align="center">
-  <img src="https://builderbot.vercel.app/assets/thumbnail-vector.png" height="80">
-</p>
+This project creates a WhatsApp bot that integrates with an AI assistant using OpenAI's API. It enables automated conversations and intelligent responses.
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/6VbbLI?referralCode=jyd_0y)
+Features
+Automated conversation flows for WhatsApp
+Integration with OpenAI's Assistant API
+Works with any WhatsApp provider (e.g., Baileys, Twilio, etc.)
+Auto-responses to frequently asked questions
+Real-time message handling
+User interaction tracking
+Expandable logic through custom triggers
 
-This project creates a WhatsApp bot that integrates with an AI assistant using BuilderBot technology. It allows for automated conversations and intelligent responses powered by OpenAI's assistant API.
+Getting Started
+Clone this repository:
 
-## Features
+git clone https://github.com/JesusMorales25/assistant-ianegbot-reference-builderbot.git
+cd assistant-ianegbot-reference-builderbot.git
+Install dependencies:
 
-- Automated conversation flows for WhatsApp
-- Integration with OpenAI's assistant API
-- Agnostic to WhatsApp provider
-- Automated responses to frequently asked questions
-- Real-time message receiving and responding
-- Interaction tracking with customers
-- Expandable functionality through triggers
+pnpm install
+Set up your environment variables in a .env file:
 
-## Getting Started
+PORT=3008
+ASSISTANT_ID=your_openai_assistant_id
+Run the development server:
 
-1. Clone this repository
-2. Install dependencies:
-   ```
-   pnpm install
-   ```
-3. Set up your environment variables in a `.env` file:
-   ```
-   PORT=3008
-   ASSISTANT_ID=your_openai_assistant_id
-   ```
-4. Run the development server:
-   ```
-   pnpm run dev
-   ```
+pnpm run dev
+Using Docker (Recommended)
+This project includes a Dockerfile for streamlined deployment. To use Docker:
 
-### Using Docker (Recommended)
+Build the Docker image:
 
-This project includes a Dockerfile for easy deployment and consistent environments. To use Docker:
+docker build -t whatsapp-ai-assistant .
+Run the container:
 
-1. Build the Docker image:
-   ```
-   docker build -t whatsapp-ai-assistant .
-   ```
-2. Run the container:
-   ```
-   docker run -p 3008:3008 --env-file .env whatsapp-ai-assistant
-   ```
+docker run -p 3008:3008 --env-file .env whatsapp-ai-assistant
+Usage
+The main logic is in src/app.ts. You can customize the flow logic, AI prompts, and handling of user messages as needed.
 
-This method ensures that the application runs in a consistent environment across different systems.
+Documentation
+For implementation guidance, environment setup, and integration examples, refer to the documentation inside the /docs directory or your provider’s official documentation.
 
-## Usage
+Contributing
+Contributions are welcome! Open a Pull Request or an Issue if you'd like to help improve the project.
 
-The bot is configured in the `src/app.ts` file. It uses the BuilderBot library to create flows and handle messages. The main welcome flow integrates with the OpenAI assistant to generate responses.
+License
+This project is open-source and available under the MIT License.
 
-## Documentation
+Contact
+For questions or support, feel free to reach out via Issues or create a discussion in the repository.
 
-For more detailed information on how to use and extend this bot, please refer to the [BuilderBot documentation](https://builderbot.vercel.app/).
+Empowering intelligent WhatsApp conversations with OpenAI.
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is open-source and available under the [MIT License](LICENSE).
-
-## Contact
-
-For questions and support, join our [Discord community](https://link.codigoencasa.com/DISCORD) or follow us on [Twitter](https://twitter.com/leifermendez).
-
----
-
-Built with [BuilderBot](https://www.builderbot.app/en) - Empowering conversational AI for WhatsApp
