@@ -14,18 +14,10 @@ const processUserMessage = async (ctx, { flowDynamic, state, provider }) => {
     await typing(ctx, provider);
 
     try {
-        const response = await axios.post(process.env.URL_BACKEND, 
-						{
-								mensaje: ctx.body,
-								numero: ctx.from
-						},
-						{
-								headers: {
-										"X-API-KEY": process.env.BOT_API_KEY
-								}
-						}
-				);
-
+        const response = await axios.post(process.env.URL_BACKEND, {
+            mensaje: ctx.body,
+            numero: ctx.from
+        });
 
         const respuesta = response.data.respuesta;
         await flowDynamic([{ body: respuesta }]);
