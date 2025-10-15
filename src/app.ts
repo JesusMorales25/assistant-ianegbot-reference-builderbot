@@ -82,7 +82,9 @@ const main = async () => {
     });
 
     httpInject(adapterProvider.server);
-    httpServer(+PORT);
+    process.env.HOST = '0.0.0.0';
+		httpServer(+PORT);
+
 };
 
 main()
