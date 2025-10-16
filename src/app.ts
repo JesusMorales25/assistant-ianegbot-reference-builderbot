@@ -94,25 +94,24 @@ const main = async () => {
         currentQR = await qrcode.toDataURL(qr);
     });
 
-    const { httpServer } = await createBot({
+    // 🧩 Inicializa el bot
+    await createBot({
         flow: adapterFlow,
         provider: adapterProvider,
         database: adapterDB,
     });
 
+    // 🧠 Inyecta HTTP para integraciones externas
     httpInject(adapterProvider.server);
-    httpServer(PORT);
 
-    console.log(`🛜 HTTP Server ON http://${HOST}:${PORT}`);
-
-    // 🌐 Servidor express
+    // 🚀 Crea el servidor Express manualmente
     const app = express();
 
     app.get("/", (req, res) => {
         res.send(`
             <html>
                 <body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;text-align:center">
-                    <h2>🤖 Bot activo en Render</h2>
+                    <h2>🤖 Bot activo en Render / Railway</h2>
                     <p>Visita <a href="/qr">/qr</a> para escanear el código QR.</p>
                 </body>
             </html>
@@ -135,8 +134,10 @@ const main = async () => {
         }
     });
 
+    // 🛜 Levanta el servidor
     app.listen(PORT, HOST, () => {
-        console.log(`🌐 Vista del QR disponible en http://${HOST}:${PORT}/qr`);
+        console.log(`🛜 HTTP Server ON http://${HOST}:${PORT}`);
+        console.log(`🌐 QR disponible en http://${HOST}:${PORT}/qr`);
     });
 };
 
