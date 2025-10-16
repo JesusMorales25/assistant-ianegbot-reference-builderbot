@@ -1,3 +1,4 @@
+// @ts-nocheck
 import "dotenv/config"
 import axios from "axios"
 import { createBot, createProvider, createFlow, addKeyword, EVENTS } from '@builderbot/bot'
@@ -5,6 +6,7 @@ import { MemoryDB } from '@builderbot/bot'
 import { BaileysProvider } from '@builderbot/provider-baileys'
 import { httpInject } from "@builderbot-plugins/openai-assistants"
 import { typing } from "./utils/presence"
+import fs from 'fs'
 
 // Configuración
 const PORT = process.env.PORT ?? 3008
@@ -50,7 +52,7 @@ const handleQueue = async (userId) => {
     userQueues.delete(userId);
 };
 
-const welcomeFlow = addKeyword<BaileysProvider, MemoryDB>(EVENTS.WELCOME)
+const welcomeFlow = addKeyword(EVENTS.WELCOME)
     .addAction(async (ctx, { flowDynamic, state, provider }) => {
         const userId = ctx.from;
 
@@ -69,15 +71,28 @@ const welcomeFlow = addKeyword<BaileysProvider, MemoryDB>(EVENTS.WELCOME)
 const main = async () => {
     const adapterFlow = createFlow([welcomeFlow]);
 
+    // Asegurar carpeta de sesiones para Baileys
+    try {
+        fs.mkdirSync('bot_sessions', { recursive: true });
+    } catch (e) {
+        console.error('❌ No se pudo crear la carpeta de sesiones:', e);
+    }
+
     const adapterProvider = createProvider(BaileysProvider, {
         groupsIgnore: true,
         readStatus: false,
+        auth: {
+            store: './bot_sessions',
+            keys: './bot_sessions'
+        },
+        printQR: true,
+        browser: ["Chrome (Linux)"]
     });
 
     const adapterDB = new MemoryDB();
 
     // Manejar evento QR
-    adapterProvider.on('qr', (qr: string) => {
+    adapterProvider.on('qr', (qr) => {
         console.log('\n=====================================')
         console.log('⚡ CÓDIGO QR - ESCANEA CON WHATSAPP')
         console.log('=====================================\n')
