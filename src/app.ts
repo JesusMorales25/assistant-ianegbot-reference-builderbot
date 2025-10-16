@@ -5,6 +5,14 @@ import { MemoryDB } from '@builderbot/bot'
 import { BaileysProvider } from '@builderbot/provider-baileys'
 import { httpInject } from "@builderbot-plugins/openai-assistants"
 import { typing } from "./utils/presence"
+import path from 'path'
+import fs from 'fs/promises'
+
+// Configuración de rutas
+const BASE_DIR = process.env.NODE_ENV === 'production' ? '/app' : process.cwd();
+const SESSIONS_DIR = path.join(BASE_DIR, 'bot_sessions');
+const TMP_DIR = path.join(BASE_DIR, 'tmp');
+const QR_PATH = path.join(BASE_DIR, 'bot.qr.png');
 
 const PORT = process.env.PORT ?? 3008
 const userQueues = new Map();
@@ -65,15 +73,47 @@ const welcomeFlow = addKeyword<BaileysProvider, MemoryDB>(EVENTS.WELCOME)
         }
     });
 
+const ensureDirectories = async () => {
+    try {
+        // Crear directorios necesarios
+        await fs.mkdir(SESSIONS_DIR, { recursive: true });
+        await fs.mkdir(TMP_DIR, { recursive: true });
+        console.log("📁 Directorios creados correctamente");
+    } catch (error) {
+        console.error("❌ Error al crear directorios:", error);
+    }
+};
+
 const main = async () => {
+    // Asegurar que los directorios existan
+    await ensureDirectories();
+    
     const adapterFlow = createFlow([welcomeFlow]);
 
     const adapterProvider = createProvider(BaileysProvider, {
         groupsIgnore: true,
         readStatus: false,
+        auth: {
+            store: SESSIONS_DIR,
+            keys: SESSIONS_DIR
+        },
+        browser: ["Chrome (Linux)"],
+        qr: {
+            store: QR_PATH
+        }
     });
 
     const adapterDB = new MemoryDB();
+
+    // Manejar evento QR
+    adapterProvider.on('qr', async (qr) => {
+        console.log('⚡ Nuevo QR generado');
+        console.log('🔍 QR guardado en:', QR_PATH);
+    });
+
+    adapterProvider.on('ready', () => {
+        console.log('✅ Bot conectado correctamente');
+    });
 
     const { httpServer } = await createBot({
         flow: adapterFlow,
