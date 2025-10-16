@@ -1,6 +1,7 @@
 import "dotenv/config";
 import axios from "axios";
 import express from "express";
+import cors from "cors";
 import qrcode from "qrcode";
 import {
     createBot,
@@ -19,12 +20,13 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 3008;
 const HOST = process.env.HOST || "0.0.0.0";
 const URL_BACKEND = process.env.URL_BACKEND;
 
-// ✅ Manejadores de mensajes
+// ✅ Controladores internos
 const userQueues = new Map();
 const userLocks = new Map();
 let currentQR = null;
+let isConnected = false;
 
-// 🧠 Procesamiento del mensaje del usuario
+// 🧠 Procesamiento del mensaje
 const processUserMessage = async (ctx, { flowDynamic, state, provider }) => {
     await typing(ctx, provider);
     try {
@@ -32,7 +34,6 @@ const processUserMessage = async (ctx, { flowDynamic, state, provider }) => {
             mensaje: ctx.body,
             numero: ctx.from,
         });
-
         const respuesta = response.data.respuesta || "Sin respuesta del servidor.";
         await flowDynamic([{ body: respuesta }]);
     } catch (error) {
@@ -41,7 +42,7 @@ const processUserMessage = async (ctx, { flowDynamic, state, provider }) => {
     }
 };
 
-// 🧱 Control de colas
+// 🧱 Manejo de colas
 const handleQueue = async (userId) => {
     const queue = userQueues.get(userId);
     if (userLocks.get(userId)) return;
@@ -66,11 +67,9 @@ const handleQueue = async (userId) => {
 const welcomeFlow = addKeyword(EVENTS.WELCOME)
     .addAction(async (ctx, { flowDynamic, state, provider }) => {
         const userId = ctx.from;
-
         if (!userQueues.has(userId)) {
             userQueues.set(userId, []);
         }
-
         const queue = userQueues.get(userId);
         queue.push({ ctx, flowDynamic, state, provider });
 
@@ -88,25 +87,34 @@ const main = async () => {
     });
     const adapterDB = new MemoryDB();
 
-    // ⚡ Captura el QR emitido por Baileys
+    // ⚡ Captura QR y conexión
     adapterProvider.on("qr", async (qr) => {
         console.log("⚡ Nuevo código QR generado");
         currentQR = await qrcode.toDataURL(qr);
+        isConnected = false;
     });
 
-    // 🧩 Inicializa el bot
-    await createBot({
+    adapterProvider.on("ready", () => {
+        console.log("✅ Bot conectado a WhatsApp correctamente");
+        isConnected = true;
+    });
+
+    // 🚀 Configura Express
+    const app = express();
+    
+    // Middlewares
+    app.use(cors());
+    app.use(express.json());
+    app.use(express.urlencoded({ extended: true }));
+
+    // 🧩 Crear bot
+    const bot = await createBot({
         flow: adapterFlow,
         provider: adapterProvider,
         database: adapterDB,
     });
 
-    // 🧠 Inyecta HTTP para integraciones externas
-    httpInject(adapterProvider.server);
-
-    // 🚀 Crea el servidor Express manualmente
-    const app = express();
-
+    // Rutas
     app.get("/", (req, res) => {
         res.send(`
             <html>
@@ -119,24 +127,29 @@ const main = async () => {
     });
 
     app.get("/qr", (req, res) => {
-        if (currentQR) {
+        if (isConnected) {
             res.send(`
-                <html>
-                    <body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">
-                        <h2>Escanea este código con tu WhatsApp 📱</h2>
-                        <img src="${currentQR}" style="width:300px;height:300px;border:1px solid #ccc;border-radius:10px"/>
-                        <p style="margin-top:20px;">Si el QR no aparece, espera unos segundos y recarga la página.</p>
-                    </body>
-                </html>
+                <html><body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">
+                    <h2>✅ Bot conectado a WhatsApp</h2>
+                    <p>Puedes cerrar esta ventana.</p>
+                </body></html>
+            `);
+        } else if (currentQR) {
+            res.send(`
+                <html><body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">
+                    <h2>Escanea este código con tu WhatsApp 📱</h2>
+                    <img src="${currentQR}" style="width:300px;height:300px;border:1px solid #ccc;border-radius:10px"/>
+                    <p style="margin-top:20px;">Si el QR no aparece, espera unos segundos y recarga la página.</p>
+                </body></html>
             `);
         } else {
-            res.send("<h3>No hay QR disponible (quizá ya está conectado o no se generó aún).</h3>");
+            res.send("<h3>No hay QR disponible aún. Espera unos segundos.</h3>");
         }
     });
 
-    // 🛜 Levanta el servidor
+    // 🛜 Levanta el servidor Express
     app.listen(PORT, HOST, () => {
-        console.log(`🛜 HTTP Server ON http://${HOST}:${PORT}`);
+        console.log(`🛜 Bot escuchando en http://${HOST}:${PORT}`);
         console.log(`🌐 QR disponible en http://${HOST}:${PORT}/qr`);
     });
 };
@@ -145,4 +158,26 @@ main()
     .then(() => console.log("🤖 Bot iniciado correctamente..."))
     .catch((err) => console.error("❌ Error al iniciar el bot:", err));
 
-process.stdin.resume();
+// Manejo de señales para cierre limpio
+const handleShutdown = async () => {
+    console.log('\n🔄 Cerrando el bot...');
+    try {
+        // Aquí puedes agregar lógica de limpieza si es necesario
+        process.exit(0);
+    } catch (error) {
+        console.error('❌ Error durante el cierre:', error);
+        process.exit(1);
+    }
+};
+
+process.on('SIGTERM', handleShutdown);
+process.on('SIGINT', handleShutdown);
+
+// Manejo de errores no capturados
+process.on('uncaughtException', (error) => {
+    console.error('❌ Error no capturado:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Promesa rechazada no manejada:', reason);
+});
