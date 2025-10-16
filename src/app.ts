@@ -5,13 +5,8 @@ import { MemoryDB } from '@builderbot/bot'
 import { BaileysProvider } from '@builderbot/provider-baileys'
 import { httpInject } from "@builderbot-plugins/openai-assistants"
 import { typing } from "./utils/presence"
-import path from 'path'
-import fs from 'fs/promises'
 
-// Configuración de rutas
-const BASE_DIR = process.env.NODE_ENV === 'production' ? '/app' : process.cwd();
-const SESSIONS_DIR = path.join(BASE_DIR, 'bot_sessions');
-
+// Configuración
 const PORT = process.env.PORT ?? 3008
 const userQueues = new Map();
 const userLocks = new Map();
@@ -71,115 +66,37 @@ const welcomeFlow = addKeyword<BaileysProvider, MemoryDB>(EVENTS.WELCOME)
         }
     });
 
-const initializeState = async () => {
-    try {
-        console.log("🔄 Inicializando estado del bot...");
-        
-        // Crear directorios necesarios
-        await fs.mkdir(SESSIONS_DIR, { recursive: true });
-
-        // Estado inicial del bot
-        const initialState = {
-            creds: {
-                me: { id: '', name: 'IAforB2B' },
-                registered: false,
-                platform: 'android'
-            },
-            keys: {}
-        };
-
-        // Guardar estado inicial
-        const statePath = path.join(SESSIONS_DIR, 'bot.state.json');
-        await fs.writeFile(statePath, JSON.stringify(initialState, null, 2));
-        
-        console.log("✅ Estado inicial creado correctamente");
-    } catch (error) {
-        console.error("❌ Error al inicializar estado:", error);
-        throw error;
-    }
-};
-
 const main = async () => {
-    try {
-        // Inicializar estado del bot
-        await initializeState();
-        
-        const adapterFlow = createFlow([welcomeFlow]);
-        
-        const adapterProvider = createProvider(BaileysProvider, {
-            name: 'IAforB2B-Bot', // Nombre para identificar el bot
-            browserDescription: ['Chrome', 'Desktop', '1.0.0'],
-            phoneNumber: '0000000000',
-            useChrome: false,
-            headless: true,
-            auth: 'state',
-            throwErrorOnTosBlock: true,
-            printQR: true,
-            authTimeoutMs: 60000,
-            browser: ['IAforB2B', 'Chrome', '1.0.0'],
-            hostNotificationLang: 'ES_es',
-            logLevel: 'silent'
-        });
+    const adapterFlow = createFlow([welcomeFlow]);
 
-        const adapterDB = new MemoryDB();
+    const adapterProvider = createProvider(BaileysProvider, {
+        groupsIgnore: true,
+        readStatus: false,
+    });
 
-        // Manejar eventos del proveedor
-        let qrAttempts = 0;
-        const maxQrAttempts = 3;
+    const adapterDB = new MemoryDB();
 
-        adapterProvider.on('qr', async (qr) => {
-            qrAttempts++;
-            console.log(`\n📱 Intento de QR ${qrAttempts}/${maxQrAttempts}`);
-            console.log('=====================================');
-            console.log('⚡ ESCANEA ESTE CÓDIGO QR EN WHATSAPP');
-            console.log('=====================================\n');
-            console.log(qr);
-            console.log('\n=====================================');
-            
-            if (qrAttempts >= maxQrAttempts) {
-                console.log('❌ Máximo de intentos de QR alcanzado');
-                // Reiniciar estado y proceso
-                await initializeState();
-                process.exit(1);
-            }
-        });
+    // Manejar evento QR
+    adapterProvider.on('qr', (qr: string) => {
+        console.log('\n=====================================')
+        console.log('⚡ CÓDIGO QR - ESCANEA CON WHATSAPP')
+        console.log('=====================================\n')
+        console.log(qr)
+        console.log('\n=====================================\n')
+    });
 
-        adapterProvider.on('loading_screen', (percent, message) => {
-            console.log('🔄 Cargando:', percent, '%', message);
-        });
+    adapterProvider.on('ready', () => {
+        console.log('✅ Bot conectado a WhatsApp!')
+    });
 
-        adapterProvider.on('auth_failure', async (reason) => {
-            console.error('⚠️ Error de autenticación:', reason);
-            // Intentar reinicializar estado
-            await initializeState();
-        });
+    const { httpServer } = await createBot({
+        flow: adapterFlow,
+        provider: adapterProvider,
+        database: adapterDB,
+    });
 
-        adapterProvider.on('connection.update', (update) => {
-            const { connection, lastDisconnect } = update;
-            console.log('🔌 Estado de conexión:', connection);
-            
-            if (connection === 'close') {
-                const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== 403;
-                console.log(shouldReconnect ? '🔄 Intentando reconexión...' : '❌ Conexión cerrada permanentemente');
-            }
-        });
-
-        adapterProvider.on('ready', () => {
-            console.log('✅ Bot conectado correctamente');
-        });
-
-        const { httpServer } = await createBot({
-            flow: adapterFlow,
-            provider: adapterProvider,
-            database: adapterDB,
-        });
-
-        httpInject(adapterProvider.server);
-        httpServer(+PORT);
-    } catch (error) {
-        console.error('❌ Error en main:', error);
-        throw error;
-    }
+    httpInject(adapterProvider.server);
+    httpServer(+PORT);
 };
 
 // Configurar manejo de errores globales
