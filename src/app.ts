@@ -25,6 +25,9 @@ const userQueues = new Map();
 const userLocks = new Map();
 let currentQR = null;
 let isConnected = false;
+let qrRetries = 0;
+const MAX_QR_RETRIES = 5;
+let connectionCheckInterval: NodeJS.Timeout | null = null;
 
 // 🧠 Procesamiento del mensaje
 const processUserMessage = async (ctx, { flowDynamic, state, provider }) => {
@@ -89,14 +92,37 @@ const main = async () => {
 
     // ⚡ Captura QR y conexión
     adapterProvider.on("qr", async (qr) => {
-        console.log("⚡ Nuevo código QR generado");
-        currentQR = await qrcode.toDataURL(qr);
-        isConnected = false;
+        console.log(`⚡ Nuevo código QR generado (intento ${qrRetries + 1}/${MAX_QR_RETRIES})`);
+        try {
+            currentQR = await qrcode.toDataURL(qr);
+            isConnected = false;
+            qrRetries++;
+
+            if (qrRetries >= MAX_QR_RETRIES) {
+                console.log("🔄 Máximo de intentos de QR alcanzado, reiniciando...");
+                process.exit(1); // Railway reiniciará el contenedor
+            }
+        } catch (error) {
+            console.error("❌ Error al generar QR:", error);
+            currentQR = null;
+        }
     });
 
     adapterProvider.on("ready", () => {
         console.log("✅ Bot conectado a WhatsApp correctamente");
         isConnected = true;
+        qrRetries = 0; // Reinicia el contador cuando se conecta exitosamente
+        
+        // Inicia el verificador de conexión
+        if (connectionCheckInterval) {
+            clearInterval(connectionCheckInterval);
+        }
+        connectionCheckInterval = setInterval(() => {
+            if (!isConnected) {
+                console.log("🔄 Conexión perdida, reiniciando...");
+                process.exit(1); // Railway reiniciará el contenedor
+            }
+        }, 30000); // Verifica cada 30 segundos
     });
 
     // 🚀 Configura Express
@@ -139,11 +165,26 @@ const main = async () => {
                 <html><body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">
                     <h2>Escanea este código con tu WhatsApp 📱</h2>
                     <img src="${currentQR}" style="width:300px;height:300px;border:1px solid #ccc;border-radius:10px"/>
-                    <p style="margin-top:20px;">Si el QR no aparece, espera unos segundos y recarga la página.</p>
+                    <p style="margin-top:20px;">Intento ${qrRetries}/${MAX_QR_RETRIES}. Si el QR no funciona, se generará uno nuevo.</p>
+                    <script>
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 30000); // Recargar cada 30 segundos si no está conectado
+                    </script>
                 </body></html>
             `);
         } else {
-            res.send("<h3>No hay QR disponible aún. Espera unos segundos.</h3>");
+            res.send(`
+                <html><body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">
+                    <h3>Generando nuevo QR...</h3>
+                    <p>La página se recargará automáticamente.</p>
+                    <script>
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 5000); // Recargar cada 5 segundos si no hay QR
+                    </script>
+                </body></html>
+            `);
         }
     });
 
