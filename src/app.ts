@@ -71,66 +71,73 @@ const welcomeFlow = addKeyword<BaileysProvider, MemoryDB>(EVENTS.WELCOME)
         }
     });
 
-const ensureDirectories = async () => {
+const cleanState = async () => {
     try {
         // Limpiar directorio de sesiones si existe
         try {
             await fs.rm(SESSIONS_DIR, { recursive: true, force: true });
-            console.log("🗑️ Directorio de sesiones eliminado");
+            console.log("🗑️ Limpiando estado anterior...");
         } catch (error) {
             // Ignorar errores si el directorio no existe
         }
 
         // Crear directorio de sesiones
         await fs.mkdir(SESSIONS_DIR, { recursive: true });
-        
-        // Crear archivo de credenciales vacío
-        await fs.writeFile(
-            path.join(SESSIONS_DIR, 'creds.json'),
-            JSON.stringify({ noiseKey: null, signedIdentityKey: null, signedPreKey: null, registrationId: null, advSecretKey: null, nextPreKeyId: null, firstUnuploadedPreKeyId: null, serverHasPreKeys: null, account: null, me: null, signalIdentities: null, lastAccountSyncTimestamp: null, myAppStateKeyId: null }),
-            'utf-8'
-        );
-        
-        console.log("📁 Directorio de sesiones creado correctamente");
+        console.log("📁 Preparando nuevo estado...");
     } catch (error) {
-        console.error("❌ Error al crear directorio:", error);
+        console.error("❌ Error al limpiar estado:", error);
         throw error;
     }
 };
 
 const main = async () => {
     try {
-        // Asegurar que los directorios existan
-        await ensureDirectories();
+        // Limpiar estado anterior
+        await cleanState();
         
         const adapterFlow = createFlow([welcomeFlow]);
         
         const adapterProvider = createProvider(BaileysProvider, {
-        groupsIgnore: true,
-        readStatus: false,
-        auth: {
-            store: SESSIONS_DIR,
-            keys: SESSIONS_DIR,
-            creds: path.join(SESSIONS_DIR, 'creds.json')
-        },
-        browser: ["Chrome (Linux)"],
-        printQR: true, // Imprimir QR en consola en lugar de guardarlo en archivo
-        linkPreview: false,
-        syncFullHistory: false,
-        markOnlineOnConnect: false,
-        retryRequestDelayMs: 10000,
-        connectTimeoutMs: 60000,
-        emitOwnEvents: true,
-        fireInitQueries: false
-    });
+            generateHighQualityLinkPreview: false,
+            customUploadLegacy: false,
+            printQR: true,
+            disableWelcome: true,
+            browser: ['Linux Chrome'],
+            auth: {
+                store: SESSIONS_DIR,
+                keys: SESSIONS_DIR,
+                creds: path.join(SESSIONS_DIR, 'creds.json')
+            },
+            logger: {
+                level: 'error'
+            },
+            groupsIgnore: true,
+            readStatus: false,
+            syncFullHistory: false,
+            markOnlineOnConnect: false,
+            retryRequestDelayMs: 10000,
+            connectTimeoutMs: 60000,
+            emitOwnEvents: true,
+            qrMaxRetries: 5,
+            fireInitQueries: false
+        });
 
         const adapterDB = new MemoryDB();
 
         // Manejar eventos del proveedor
+        let qrGenerated = false;
+
         adapterProvider.on('qr', (qr) => {
-            console.log('\n⚡ NUEVO CÓDIGO QR GENERADO\n');
-            console.log(qr);
-            console.log('\n🔍 Escanea el código QR con WhatsApp\n');
+            if (!qrGenerated) {
+                console.log('\n=========================');
+                console.log('⚡ NUEVO CÓDIGO QR GENERADO');
+                console.log('=========================\n');
+                console.log(qr);
+                console.log('\n=========================');
+                console.log('🔍 Escanea el código QR arriba con WhatsApp');
+                console.log('=========================\n');
+                qrGenerated = true;
+            }
         });
 
         adapterProvider.on('loading_screen', (percent, message) => {
@@ -140,7 +147,7 @@ const main = async () => {
         adapterProvider.on('auth_failure', async (reason) => {
             console.error('⚠️ Error de autenticación:', reason);
             // Intentar limpiar y reiniciar
-            await ensureDirectories();
+            await cleanState();
         });
 
         adapterProvider.on('connection.update', (update) => {
