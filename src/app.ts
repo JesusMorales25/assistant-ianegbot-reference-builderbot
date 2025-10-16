@@ -1,52 +1,45 @@
 import "dotenv/config";
-import axios from "axios";
-import express from "express";
-import cors from "cors";
-import qrcode from "qrcode";
-import fs from "fs";
-import {
-    createBot,
-    createProvider,
-    createFlow,
-    addKeyword,
-    EVENTS
-} from "@builderbot/bot";
-import { MemoryDB } from "@builderbot/bot";
-import { BaileysProvider } from "@builderbot/provider-baileys";
-import { httpInject } from "@builderbot-plugins/openai-assistants";
+import { createBot, createProvider, createFlow, addKeyword, EVENTS } from '@builderbot/bot';
+import { MemoryDB } from '@builderbot/bot';
+import { BaileysProvider } from '@builderbot/provider-baileys';
+import { toAsk } from "@builderbot-plugins/openai-assistants";
 import { typing } from "./utils/presence.js";
+import express from 'express';
+import cors from 'cors';
+import qrcode from 'qrcode';
+import fs from 'fs';
 
-// ✅ Variables de entorno
+/** Variables de entorno */
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3008;
-const HOST = process.env.HOST || "0.0.0.0";
-const URL_BACKEND = process.env.URL_BACKEND;
+const ASSISTANT_ID = process.env.ASSISTANT_ID ?? '';
 
-// ✅ Controladores internos
+/** Controladores internos */
 const userQueues = new Map();
 const userLocks = new Map();
-let currentQR = null;
-let isConnected = false;
-let qrRetries = 0;
-const MAX_QR_RETRIES = 5;
-let connectionCheckInterval: NodeJS.Timeout | null = null;
+let qrCodeValue: string | null = null;
+let currentQRBase64: string | null = null;
 
-// 🧠 Procesamiento del mensaje
+/**
+ * Procesa el mensaje del usuario
+ */
 const processUserMessage = async (ctx, { flowDynamic, state, provider }) => {
     await typing(ctx, provider);
     try {
-        const response = await axios.post(URL_BACKEND, {
-            mensaje: ctx.body,
-            numero: ctx.from,
-        });
-        const respuesta = response.data.respuesta || "Sin respuesta del servidor.";
-        await flowDynamic([{ body: respuesta }]);
+        const response = await toAsk(ASSISTANT_ID, ctx.body, state);
+        const chunks = response.split(/\n\n+/);
+        for (const chunk of chunks) {
+            const cleanedChunk = chunk.trim().replace(/【.*?】[ ] /g, "");
+            await flowDynamic([{ body: cleanedChunk }]);
+        }
     } catch (error) {
-        console.error("❌ Error al conectarse al backend:", error.message);
-        await flowDynamic([{ body: "Error al procesar tu mensaje. Intenta más tarde." }]);
+        console.error("❌ Error al procesar mensaje:", error.message);
+        await flowDynamic([{ body: "Lo siento, hubo un error al procesar tu mensaje. Por favor, intenta de nuevo." }]);
     }
 };
 
-// 🧱 Manejo de colas
+/**
+ * Maneja la cola de mensajes
+ */
 const handleQueue = async (userId) => {
     const queue = userQueues.get(userId);
     if (userLocks.get(userId)) return;
@@ -67,7 +60,9 @@ const handleQueue = async (userId) => {
     userQueues.delete(userId);
 };
 
-// 🏁 Flujo principal
+/**
+ * Flujo principal
+ */
 const welcomeFlow = addKeyword(EVENTS.WELCOME)
     .addAction(async (ctx, { flowDynamic, state, provider }) => {
         const userId = ctx.from;
@@ -82,204 +77,115 @@ const welcomeFlow = addKeyword(EVENTS.WELCOME)
         }
     });
 
-// 🧹 Función para limpiar sesión
-const cleanSession = async () => {
-    try {
-        await fs.promises.rm('./bot_sessions', { recursive: true, force: true });
-        console.log("🗑️ Archivos de sesión eliminados");
-    } catch (error) {
-        console.error("❌ Error al limpiar sesión:", error);
-    }
-};
-
-// 🚀 Inicialización del bot
+/**
+ * Función principal
+ */
 const main = async () => {
-    // Crear carpetas necesarias
-    try {
-        if (!fs.existsSync('./bot_sessions')) {
-            fs.mkdirSync('./bot_sessions', { recursive: true });
-        }
-    } catch (error) {
-        console.error('❌ Error al crear carpetas:', error);
+    // Crear carpeta de sesiones si no existe
+    if (!fs.existsSync('./bot_sessions')) {
+        fs.mkdirSync('./bot_sessions', { recursive: true });
     }
 
-    // Limpiar sesión al inicio si hay problemas
-    if (process.env.CLEAN_SESSION === "true") {
-        await cleanSession();
-    }
     const adapterFlow = createFlow([welcomeFlow]);
     const adapterProvider = createProvider(BaileysProvider, {
-        groupsIgnore: true,
-        readStatus: false,
-        usePairingCode: false, // Deshabilitamos código de emparejamiento para usar QR
-        browser: ["IAforB2B Assistant", "Chrome", "4.0.0"], // Identificación del navegador
+        browser: ["IAforB2B Assistant", "Chrome", "4.0.0"],
         auth: {
-            folder: './bot_sessions', // Carpeta para guardar las sesiones
-            sessionName: 'bot_session' // Nombre base para los archivos de sesión
-        },
+            store: './bot_sessions',
+            keys: './bot_sessions'
+        }
     });
+
     const adapterDB = new MemoryDB();
 
-    // ⚡ Captura QR y conexión
+    // Eventos del bot
     adapterProvider.on("qr", async (qr) => {
-        console.log(`⚡ Nuevo código QR generado (intento ${qrRetries + 1}/${MAX_QR_RETRIES})`);
+        console.log("⚡ Nuevo QR generado");
+        qrCodeValue = qr;
+        
         try {
-            // Guardar el QR como imagen
-            await qrcode.toFile('./bot.qr.png', qr);
-            console.log("✅ QR guardado en bot.qr.png");
+            // Generar QR en base64
+            currentQRBase64 = await qrcode.toDataURL(qr);
             
-            // También guardar como data URL para la web
-            currentQR = await qrcode.toDataURL(qr);
-            console.log("✅ QR generado exitosamente");
-            
-            // Imprimir el QR en la consola para Railway
+            // Imprimir en consola para los logs
             console.log("\n🔍 Escanea este QR con WhatsApp:");
             console.log(qr);
-            
-            isConnected = false;
-            qrRetries++;
-
-            if (qrRetries >= MAX_QR_RETRIES) {
-                console.log("🔄 Máximo de intentos de QR alcanzado, reiniciando...");
-                process.exit(1); // Railway reiniciará el contenedor
-            }
         } catch (error) {
             console.error("❌ Error al generar QR:", error);
-            console.error(error);
-            currentQR = null;
         }
-    });
-    
-    // Manejadores adicionales de eventos
-    adapterProvider.on("auth_failure", async (error) => {
-        console.error("❌ Error de autenticación:", error);
-        // Eliminar archivos de sesión si hay error de auth
-        try {
-            await fs.promises.rm('./bot_sessions', { recursive: true, force: true });
-            console.log("🗑️ Archivos de sesión eliminados");
-            process.exit(1); // Reiniciar para generar nueva sesión
-        } catch (e) {
-            console.error("❌ Error al limpiar sesión:", e);
-        }
-    });
-
-    adapterProvider.on("disconnected", (reason) => {
-        console.log("❌ Bot desconectado:", reason);
-        isConnected = false;
-        process.exit(1); // Reiniciar para reconectar
     });
 
     adapterProvider.on("ready", () => {
-        console.log("✅ Bot conectado a WhatsApp correctamente");
-        isConnected = true;
-        qrRetries = 0; // Reinicia el contador cuando se conecta exitosamente
-        
-        // Inicia el verificador de conexión
-        if (connectionCheckInterval) {
-            clearInterval(connectionCheckInterval);
-        }
-        connectionCheckInterval = setInterval(() => {
-            if (!isConnected) {
-                console.log("🔄 Conexión perdida, reiniciando...");
-                process.exit(1); // Railway reiniciará el contenedor
-            }
-        }, 30000); // Verifica cada 30 segundos
+        console.log("✅ Bot conectado correctamente");
+        qrCodeValue = null;
+        currentQRBase64 = null;
     });
 
-    // 🚀 Configura Express
-    const app = express();
-    
-    // Middlewares
-    app.use(cors());
-    app.use(express.json());
-    app.use(express.urlencoded({ extended: true }));
-
-    // 🧩 Crear bot
+    // Crear bot
     const bot = await createBot({
         flow: adapterFlow,
         provider: adapterProvider,
-        database: adapterDB,
+        database: adapterDB
     });
 
-    // Rutas
-    app.get("/", (req, res) => {
+    // Servidor web simple
+    const app = express();
+    app.use(cors());
+
+    // Ruta para el QR
+    // Ruta principal
+    app.get('/', (_req, res) => {
         res.send(`
             <html>
-                <body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;text-align:center">
-                    <h2>🤖 Bot activo en Render / Railway</h2>
-                    <p>Visita <a href="/qr">/qr</a> para escanear el código QR.</p>
+                <body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">
+                    <h2>🤖 Bot de WhatsApp</h2>
+                    <p>Visita <a href="/qr">/qr</a> para escanear el código QR</p>
                 </body>
             </html>
         `);
     });
 
-    app.get("/qr", (req, res) => {
-        if (isConnected) {
+    // Ruta para el QR
+    app.get('/qr', (_req, res) => {
+        if (!currentQRBase64) {
             res.send(`
-                <html><body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">
-                    <h2>✅ Bot conectado a WhatsApp</h2>
-                    <p>Puedes cerrar esta ventana.</p>
-                </body></html>
+                <html>
+                    <body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">
+                        <h2>✅ Bot conectado a WhatsApp</h2>
+                        <p>No hay QR disponible porque el bot ya está conectado.</p>
+                        <script>
+                            if (!document.querySelector('h2').textContent.includes('✅')) {
+                                setTimeout(() => window.location.reload(), 5000);
+                            }
+                        </script>
+                    </body>
+                </html>
             `);
-        } else if (currentQR) {
-            res.send(`
-                <html><body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">
-                    <h2>Escanea este código con tu WhatsApp 📱</h2>
-                    <img src="${currentQR}" style="width:300px;height:300px;border:1px solid #ccc;border-radius:10px"/>
-                    <p style="margin-top:20px;">Intento ${qrRetries}/${MAX_QR_RETRIES}. Si el QR no funciona, se generará uno nuevo.</p>
-                    <script>
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 30000); // Recargar cada 30 segundos si no está conectado
-                    </script>
-                </body></html>
-            `);
-        } else {
-            res.send(`
-                <html><body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">
-                    <h3>Generando nuevo QR...</h3>
-                    <p>La página se recargará automáticamente.</p>
-                    <script>
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 5000); // Recargar cada 5 segundos si no hay QR
-                    </script>
-                </body></html>
-            `);
+            return;
         }
+
+        res.send(`
+            <html>
+                <body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">
+                    <h2>Escanea este código QR con WhatsApp 📱</h2>
+                    <img src="${currentQRBase64}" alt="QR Code" style="width:300px;height:300px"/>
+                    <p style="margin-top:20px">La página se actualizará automáticamente</p>
+                    <script>
+                        setTimeout(() => window.location.reload(), 20000);
+                    </script>
+                </body>
+            </html>
+        `);
     });
 
-    // 🛜 Levanta el servidor Express
-    app.listen(PORT, HOST, () => {
-        console.log(`🛜 Bot escuchando en http://${HOST}:${PORT}`);
-        console.log(`🌐 QR disponible en http://${HOST}:${PORT}/qr`);
+    // Iniciar servidor
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`🚀 Servidor iniciado en el puerto ${PORT}`);
+        console.log(`🌐 QR disponible en: http://localhost:${PORT}/qr`);
     });
 };
 
-main()
-    .then(() => console.log("🤖 Bot iniciado correctamente..."))
-    .catch((err) => console.error("❌ Error al iniciar el bot:", err));
+main().catch(console.error);
 
-// Manejo de señales para cierre limpio
-const handleShutdown = async () => {
-    console.log('\n🔄 Cerrando el bot...');
-    try {
-        // Aquí puedes agregar lógica de limpieza si es necesario
-        process.exit(0);
-    } catch (error) {
-        console.error('❌ Error durante el cierre:', error);
-        process.exit(1);
-    }
-};
-
-process.on('SIGTERM', handleShutdown);
-process.on('SIGINT', handleShutdown);
-
-// Manejo de errores no capturados
-process.on('uncaughtException', (error) => {
-    console.error('❌ Error no capturado:', error);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('❌ Promesa rechazada no manejada:', reason);
-});
+// Manejo de errores
+process.on('uncaughtException', console.error);
+process.on('unhandledRejection', console.error);
