@@ -11,8 +11,6 @@ import fs from 'fs/promises'
 // Configuración de rutas
 const BASE_DIR = process.env.NODE_ENV === 'production' ? '/app' : process.cwd();
 const SESSIONS_DIR = path.join(BASE_DIR, 'bot_sessions');
-const TMP_DIR = path.join(BASE_DIR, 'tmp');
-const QR_PATH = path.join(BASE_DIR, 'bot.qr.png');
 
 const PORT = process.env.PORT ?? 3008
 const userQueues = new Map();
@@ -75,18 +73,16 @@ const welcomeFlow = addKeyword<BaileysProvider, MemoryDB>(EVENTS.WELCOME)
 
 const ensureDirectories = async () => {
     try {
-        // Limpiar directorios si existen
+        // Limpiar directorio de sesiones si existe
         try {
             await fs.rm(SESSIONS_DIR, { recursive: true, force: true });
-            await fs.rm(TMP_DIR, { recursive: true, force: true });
-            console.log("🗑️ Directorios anteriores eliminados");
+            console.log("🗑️ Directorio de sesiones eliminado");
         } catch (error) {
-            // Ignorar errores si los directorios no existen
+            // Ignorar errores si el directorio no existe
         }
 
-        // Crear directorios nuevos
+        // Crear directorio de sesiones
         await fs.mkdir(SESSIONS_DIR, { recursive: true });
-        await fs.mkdir(TMP_DIR, { recursive: true });
         
         // Crear archivo de credenciales vacío
         await fs.writeFile(
@@ -95,10 +91,10 @@ const ensureDirectories = async () => {
             'utf-8'
         );
         
-        console.log("📁 Directorios y archivos creados correctamente");
+        console.log("📁 Directorio de sesiones creado correctamente");
     } catch (error) {
-        console.error("❌ Error al crear directorios:", error);
-        throw error; // Propagar el error para manejo superior
+        console.error("❌ Error al crear directorio:", error);
+        throw error;
     }
 };
 
@@ -118,9 +114,7 @@ const main = async () => {
             creds: path.join(SESSIONS_DIR, 'creds.json')
         },
         browser: ["Chrome (Linux)"],
-        qr: {
-            store: QR_PATH
-        },
+        printQR: true, // Imprimir QR en consola en lugar de guardarlo en archivo
         linkPreview: false,
         syncFullHistory: false,
         markOnlineOnConnect: false,
@@ -133,9 +127,10 @@ const main = async () => {
         const adapterDB = new MemoryDB();
 
         // Manejar eventos del proveedor
-        adapterProvider.on('qr', async (qr) => {
-            console.log('⚡ Nuevo QR generado');
-            console.log('🔍 QR guardado en:', QR_PATH);
+        adapterProvider.on('qr', (qr) => {
+            console.log('\n⚡ NUEVO CÓDIGO QR GENERADO\n');
+            console.log(qr);
+            console.log('\n🔍 Escanea el código QR con WhatsApp\n');
         });
 
         adapterProvider.on('loading_screen', (percent, message) => {
