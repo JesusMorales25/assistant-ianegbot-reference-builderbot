@@ -3,6 +3,7 @@ import axios from "axios";
 import express from "express";
 import cors from "cors";
 import qrcode from "qrcode";
+import fs from "fs";
 import {
     createBot,
     createProvider,
@@ -81,12 +82,32 @@ const welcomeFlow = addKeyword(EVENTS.WELCOME)
         }
     });
 
+// 🧹 Función para limpiar sesión
+const cleanSession = async () => {
+    try {
+        await fs.promises.rm('./bot_sessions', { recursive: true, force: true });
+        console.log("🗑️ Archivos de sesión eliminados");
+    } catch (error) {
+        console.error("❌ Error al limpiar sesión:", error);
+    }
+};
+
 // 🚀 Inicialización del bot
 const main = async () => {
+    // Limpiar sesión al inicio si hay problemas
+    if (process.env.CLEAN_SESSION === "true") {
+        await cleanSession();
+    }
     const adapterFlow = createFlow([welcomeFlow]);
     const adapterProvider = createProvider(BaileysProvider, {
         groupsIgnore: true,
         readStatus: false,
+        usePairingCode: false, // Deshabilitamos código de emparejamiento para usar QR
+        browser: ["IAforB2B Assistant", "Chrome", "4.0.0"], // Identificación del navegador
+        auth: {
+            folder: './bot_sessions', // Carpeta para guardar las sesiones
+            sessionName: 'bot_session' // Nombre base para los archivos de sesión
+        },
     });
     const adapterDB = new MemoryDB();
 
@@ -95,6 +116,7 @@ const main = async () => {
         console.log(`⚡ Nuevo código QR generado (intento ${qrRetries + 1}/${MAX_QR_RETRIES})`);
         try {
             currentQR = await qrcode.toDataURL(qr);
+            console.log("✅ QR generado exitosamente");
             isConnected = false;
             qrRetries++;
 
@@ -104,8 +126,28 @@ const main = async () => {
             }
         } catch (error) {
             console.error("❌ Error al generar QR:", error);
+            console.error(error);
             currentQR = null;
         }
+    });
+    
+    // Manejadores adicionales de eventos
+    adapterProvider.on("auth_failure", async (error) => {
+        console.error("❌ Error de autenticación:", error);
+        // Eliminar archivos de sesión si hay error de auth
+        try {
+            await fs.promises.rm('./bot_sessions', { recursive: true, force: true });
+            console.log("🗑️ Archivos de sesión eliminados");
+            process.exit(1); // Reiniciar para generar nueva sesión
+        } catch (e) {
+            console.error("❌ Error al limpiar sesión:", e);
+        }
+    });
+
+    adapterProvider.on("disconnected", (reason) => {
+        console.log("❌ Bot desconectado:", reason);
+        isConnected = false;
+        process.exit(1); // Reiniciar para reconectar
     });
 
     adapterProvider.on("ready", () => {
