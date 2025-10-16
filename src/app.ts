@@ -77,14 +77,26 @@ const welcomeFlow = addKeyword(EVENTS.WELCOME)
         }
     });
 
+// Función para limpiar sesiones anteriores
+const cleanSessions = async () => {
+    try {
+        if (fs.existsSync('./bot_sessions')) {
+            await fs.promises.rm('./bot_sessions', { recursive: true, force: true });
+            console.log("🗑️ Sesiones anteriores eliminadas");
+        }
+        fs.mkdirSync('./bot_sessions', { recursive: true });
+        console.log("📁 Carpeta de sesiones creada");
+    } catch (error) {
+        console.error("❌ Error al limpiar sesiones:", error);
+    }
+};
+
 /**
  * Función principal
  */
 const main = async () => {
-    // Crear carpeta de sesiones si no existe
-    if (!fs.existsSync('./bot_sessions')) {
-        fs.mkdirSync('./bot_sessions', { recursive: true });
-    }
+    // Limpiar sesiones anteriores para forzar nuevo QR
+    await cleanSessions();
 
     const adapterFlow = createFlow([welcomeFlow]);
     const adapterProvider = createProvider(BaileysProvider, {
@@ -92,7 +104,9 @@ const main = async () => {
         auth: {
             store: './bot_sessions',
             keys: './bot_sessions'
-        }
+        },
+        reconnect: false, // Desactivar reconexión automática
+        qrMaxRetries: 1, // Solo permitir un intento de QR
     });
 
     const adapterDB = new MemoryDB();
@@ -118,7 +132,34 @@ const main = async () => {
         console.log("✅ Bot conectado correctamente");
         qrCodeValue = null;
         currentQRBase64 = null;
+        // Guardar estado de conexión
+        fs.writeFileSync('./bot_sessions/connected.json', JSON.stringify({ timestamp: Date.now() }));
     });
+
+    // Verificar si la última conexión fue hace más de 24 horas
+    const checkLastConnection = () => {
+        try {
+            if (fs.existsSync('./bot_sessions/connected.json')) {
+                const data = JSON.parse(fs.readFileSync('./bot_sessions/connected.json', 'utf8'));
+                const lastConnection = new Date(data.timestamp);
+                const now = new Date();
+                const hours = (now.getTime() - lastConnection.getTime()) / (1000 * 60 * 60);
+                
+                if (hours > 24) {
+                    console.log("🔄 Última conexión hace más de 24 horas, forzando reconexión");
+                    return true;
+                }
+            }
+            return false;
+        } catch (error) {
+            console.error("❌ Error al verificar última conexión:", error);
+            return true;
+        }
+    };
+
+    if (checkLastConnection()) {
+        await cleanSessions();
+    }
 
     // Crear bot
     const bot = await createBot({
