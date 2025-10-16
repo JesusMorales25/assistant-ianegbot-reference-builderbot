@@ -71,72 +71,76 @@ const welcomeFlow = addKeyword<BaileysProvider, MemoryDB>(EVENTS.WELCOME)
         }
     });
 
-const cleanState = async () => {
+const initializeState = async () => {
     try {
-        // Limpiar directorio de sesiones si existe
-        try {
-            await fs.rm(SESSIONS_DIR, { recursive: true, force: true });
-            console.log("🗑️ Limpiando estado anterior...");
-        } catch (error) {
-            // Ignorar errores si el directorio no existe
-        }
-
-        // Crear directorio de sesiones
+        console.log("🔄 Inicializando estado del bot...");
+        
+        // Crear directorios necesarios
         await fs.mkdir(SESSIONS_DIR, { recursive: true });
-        console.log("📁 Preparando nuevo estado...");
+
+        // Estado inicial del bot
+        const initialState = {
+            creds: {
+                me: { id: '', name: 'IAforB2B' },
+                registered: false,
+                platform: 'android'
+            },
+            keys: {}
+        };
+
+        // Guardar estado inicial
+        const statePath = path.join(SESSIONS_DIR, 'bot.state.json');
+        await fs.writeFile(statePath, JSON.stringify(initialState, null, 2));
+        
+        console.log("✅ Estado inicial creado correctamente");
     } catch (error) {
-        console.error("❌ Error al limpiar estado:", error);
+        console.error("❌ Error al inicializar estado:", error);
         throw error;
     }
 };
 
 const main = async () => {
     try {
-        // Limpiar estado anterior
-        await cleanState();
+        // Inicializar estado del bot
+        await initializeState();
         
         const adapterFlow = createFlow([welcomeFlow]);
         
         const adapterProvider = createProvider(BaileysProvider, {
-            generateHighQualityLinkPreview: false,
-            customUploadLegacy: false,
+            name: 'IAforB2B-Bot', // Nombre para identificar el bot
+            browserDescription: ['Chrome', 'Desktop', '1.0.0'],
+            phoneNumber: '0000000000',
+            useChrome: false,
+            headless: true,
+            auth: 'state',
+            throwErrorOnTosBlock: true,
             printQR: true,
-            disableWelcome: true,
-            browser: ['Linux Chrome'],
-            auth: {
-                store: SESSIONS_DIR,
-                keys: SESSIONS_DIR,
-                creds: path.join(SESSIONS_DIR, 'creds.json')
-            },
-            logger: {
-                level: 'error'
-            },
-            groupsIgnore: true,
-            readStatus: false,
-            syncFullHistory: false,
-            markOnlineOnConnect: false,
-            retryRequestDelayMs: 10000,
-            connectTimeoutMs: 60000,
-            emitOwnEvents: true,
-            qrMaxRetries: 5,
-            fireInitQueries: false
+            authTimeoutMs: 60000,
+            browser: ['IAforB2B', 'Chrome', '1.0.0'],
+            hostNotificationLang: 'ES_es',
+            logLevel: 'silent'
         });
 
         const adapterDB = new MemoryDB();
 
         // Manejar eventos del proveedor
-        let qrGenerated = false;
+        let qrAttempts = 0;
+        const maxQrAttempts = 3;
 
-        adapterProvider.on('qr', (qr) => {
-            if (!qrGenerated) {
-                console.log('\n=========================');
-                console.log('⚡ NUEVO CÓDIGO QR GENERADO');
-                console.log('=========================\n');
-                console.log(qr);
-                console.log('\n=========================');
-                console.log('🔍 Escanea el código QR arriba con WhatsApp');
-                console.log('=========================\n');
-                qrGenerated = true;
+        adapterProvider.on('qr', async (qr) => {
+            qrAttempts++;
+            console.log(`\n📱 Intento de QR ${qrAttempts}/${maxQrAttempts}`);
+            console.log('=====================================');
+            console.log('⚡ ESCANEA ESTE CÓDIGO QR EN WHATSAPP');
+            console.log('=====================================\n');
+            console.log(qr);
+            console.log('\n=====================================');
+            
+            if (qrAttempts >= maxQrAttempts) {
+                console.log('❌ Máximo de intentos de QR alcanzado');
+                // Reiniciar estado y proceso
+                await initializeState();
+                process.exit(1);
             }
         });
 
@@ -146,8 +150,8 @@ const main = async () => {
 
         adapterProvider.on('auth_failure', async (reason) => {
             console.error('⚠️ Error de autenticación:', reason);
-            // Intentar limpiar y reiniciar
-            await cleanState();
+            // Intentar reinicializar estado
+            await initializeState();
         });
 
         adapterProvider.on('connection.update', (update) => {
